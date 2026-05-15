@@ -609,7 +609,7 @@ export const generateGeminiImage = async (
 export const generateImageFree = async (prompt: string) => {
   const encodedPrompt = encodeURIComponent(prompt);
   const seed = Math.floor(Math.random() * 1000000);
-  const imageUrl = `https://pollinations.ai/p/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=flux`;
+  const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${seed}`;
   
   // Synthetic delay to allow Flux model to "render" on their end and show feedback in UI
   return { url: imageUrl, directUrl: true }; 
