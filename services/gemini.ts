@@ -615,11 +615,6 @@ export const generateImageFree = async (prompt: string) => {
   await sleep(12000); 
   
   // Trigger generation by pinging the URL (pollinations generates on GET)
-  try {
-     await fetch(imageUrl);
-  } catch (e) {
-     console.warn("Free image generation probe failed, proceeding with URL:", e);
-  }
   
   return { url: imageUrl };
 };
