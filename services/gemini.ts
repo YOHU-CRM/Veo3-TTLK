@@ -612,7 +612,7 @@ export const generateImageFree = async (prompt: string) => {
   const imageUrl = `https://pollinations.ai/p/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=flux`;
   
   // Synthetic delay to allow Flux model to "render" on their end and show feedback in UI
-  await sleep(12000); 
+  return { url: imageUrl, directUrl: true }; 
   
   // Trigger generation by pinging the URL (pollinations generates on GET)
   
