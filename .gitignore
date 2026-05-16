@@ -1,0 +1,7 @@
+*.dll
+*.exe
+*.py
+YOHU_PRO_BATCH_*/
+node_modules/
+.env
+dist/
