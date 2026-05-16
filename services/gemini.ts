@@ -395,7 +395,7 @@ export const generateGeminiText = async (
     const apiKey = uniqueKeys[i];
     const ai = new GoogleGenAI({ apiKey });
     
-    const models = ['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemini-flash-latest'];
+    const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']; // ✅ Model text đúng, free key dùng được
     
     for (const modelName of models) {
       try {
@@ -493,9 +493,9 @@ export const generateGeminiImage = async (
     
     // Recommended models for image generation from skill
     const models = [
-      'gemini-3.1-flash-image-preview',
-      'gemini-3-pro-image-preview',
-      'gemini-2.5-flash-image'
+      'gemini-2.0-flash-preview-image-generation', // ✅ FREE key dùng được
+      'imagen-3.0-generate-002',                   // ✅ Chất lượng cao, tự fallback khi free hết
+      'imagen-3.0-fast-generate-001',                // ✅ Nhanh hơn, fallback cuối
     ];
     
     for (const modelName of models) {
@@ -520,14 +520,14 @@ export const generateGeminiImage = async (
             parts.push({ text: finalPrompt });
 
             // For Gemini models, we might need different modalities if they support generation
-            const isGemini = modelName.includes('gemini');
+            const isGemini = modelName.startsWith('gemini');
             
             const response = await ai.models.generateContent({
               model: modelName,
               contents: [{ role: 'user', parts: parts }],
               config: isGemini ? {
                 // gemini-2.0-flash can sometimes generate images if properly prompted and supported
-                responseModalities: [Modality.IMAGE],
+                responseModalities: [Modality.TEXT, Modality.IMAGE],
                 safetySettings: [
                   { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
                   { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
@@ -706,7 +706,7 @@ TEXT: ${segmentText}`;
         const voiceName = chunk.gender === 'MALE' ? 'Fenrir' : 'Kore'; // Fenrir is deeper and stronger
         
         const response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-tts-preview",
+          model: "gemini-2.5-flash-preview-tts", // ✅ Model TTS đúng hiện tại
           contents: [{ role: 'user', parts: [{ text: promptText }] }],
           config: {
             responseModalities: [Modality.AUDIO],
