@@ -363,8 +363,7 @@ const App: React.FC = () => {
 
     const interval = setInterval(() => {
       fetchUserData(email);
-    }, 10000); // 10s cập nhật 1 lần
-
+    }, 300000); // 5 phút cập nhật 1 lần
     return () => {
       clearTimeout(timer);
       clearInterval(interval);
