@@ -142,7 +142,10 @@ export const Layout: React.FC<LayoutProps> = ({
     if (!adminUserEmail) return;
     
     // Gọi hàm activateAffiliate giống hệt form đăng ký chính (truyền đúng email, phone, số ngày, email giới thiệu)
-    await onAdminActivateAffiliate(adminUserEmail, adminUserPhone, adminDays, adminRefBy, planType);
+  const fixedPhone = adminUserPhone && !adminUserPhone.startsWith('0') 
+  ? '0' + adminUserPhone 
+  : adminUserPhone;
+await onAdminActivateAffiliate(adminUserEmail, fixedPhone, adminDays, adminRefBy, planType);
 
     const userData = await onAdminFetchUser(adminUserEmail);
     if (userData) {
