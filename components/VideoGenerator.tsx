@@ -1306,7 +1306,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             try {
               // Show Rendering status
         
-              const freeRes = await generateImageFree(finalPrompt);
+              const freeRes = await generateImageFree(finalPrompt, refImage || undefined, undefined, undefined, validationResult.effectiveApiKeys);
               imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
@@ -1406,7 +1406,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       let imageUrl: string;
       if (profile.use_free_image_gen) {
         try {
-          const freeRes = await generateImageFree(finalPrompt);
+          const freeRes = await generateImageFree(finalPrompt, refImage || undefined, undefined, undefined, validationResult.effectiveApiKeys);
           imageUrl = freeRes.url;
           if (!imageUrl) throw new Error("Empty URL from free gen");
         } catch (freeErr) {
@@ -1483,7 +1483,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           let imageUrl: string;
           if (profile.use_free_image_gen) {
             try {
-              const freeRes = await generateImageFree(finalPrompt);
+              const freeRes = await generateImageFree(finalPrompt, refImage || undefined, undefined, undefined, validationResult.effectiveApiKeys);
               imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
