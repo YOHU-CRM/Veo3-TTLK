@@ -534,40 +534,42 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     }
   };
 
-  // Tải ảnh Pollinations về base64 ngay lúc render — để ZIP không bị trắng
-  const fetchToBase64 = async (url: string, retries = 3): Promise<string> => {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        // Delay tăng dần giữa các lần retry để tránh rate limit
-        if (attempt > 1) await new Promise(r => setTimeout(r, attempt * 3000));
-        const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        return await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      } catch (err) {
-        console.warn(`[fetchToBase64] Lần ${attempt}/${retries} thất bại:`, err);
-        if (attempt === retries) {
-          console.warn('[fetchToBase64] Giữ URL gốc:', url);
-          return url; // fallback giữ URL gốc
-        }
-      }
-    }
-    return url;
+  // Convert URL → base64 qua canvas (bypass CORS, không bị 402)
+  const urlToBase64ViaCanvas = (url: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 1024;
+        canvas.height = img.naturalHeight || 1024;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => resolve(url); // fallback giữ URL gốc
+      img.src = url;
+    });
   };
 
-  const downloadImageFile = (url: string, filename: string) => {
+  // fetchToBase64 dùng canvas thay vì fetch — không bị 402/CORS
+  const fetchToBase64 = (url: string): Promise<string> => {
+    if (!url.startsWith('http')) return Promise.resolve(url);
+    return urlToBase64ViaCanvas(url);
+  };
+
+  const downloadImageFile = async (url: string, filename: string) => {
+    let dataUrl = url;
     if (url.startsWith('http')) {
-      // URL thẳng (Pollinations...) → mở tab mới để không mất state
-      window.open(url, '_blank', 'noopener,noreferrer');
+      dataUrl = await urlToBase64ViaCanvas(url);
+    }
+    // Nếu canvas vẫn trả về URL (CORS fail) → mở tab mới
+    if (dataUrl.startsWith('http')) {
+      window.open(dataUrl, '_blank', 'noopener,noreferrer');
       return;
     }
     const a = document.createElement('a');
-    a.href = url;
+    a.href = dataUrl;
     a.download = `${filename}.png`;
     document.body.appendChild(a);
     a.click();
@@ -581,18 +583,27 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     const folderName = `YOHU_PRO_BATCH_${Date.now()}`;
     const folder = zip.folder(folderName);
     if (!folder) return;
+
+    const urlLinks: string[] = [];
+
     for (let i = 0; i < targetResults.length; i++) {
-      let imgUrl = targetResults[i].url;
-      // Nếu vẫn là URL thẳng (Pollinations chưa fetch) → tải về base64 trước khi ZIP
-      if (imgUrl.startsWith('http')) {
-        imgUrl = await fetchToBase64(imgUrl);
-      }
-      const imgData = imgUrl.split(',')[1];
-      if (imgData) {
-        folder.file(`Scene_${i+1}.png`, imgData, {base64: true});
+      const imgUrl = targetResults[i].url;
+      if (imgUrl.startsWith('data:')) {
+        // base64 → lưu thẳng vào ZIP
+        const imgData = imgUrl.split(',')[1];
+        if (imgData) folder.file(`Scene_${i+1}.png`, imgData, { base64: true });
+      } else {
+        // URL thẳng → ghi vào links.txt, không fetch
+        urlLinks.push(`Scene_${i+1}: ${imgUrl}`);
       }
     }
-    const content = await zip.generateAsync({type: "blob"});
+
+    // Nếu có URL thẳng → thêm file links.txt vào ZIP
+    if (urlLinks.length > 0) {
+      folder.file('image_links.txt', urlLinks.join('\n'));
+    }
+
+    const content = await zip.generateAsync({ type: 'blob' });
     saveAs(content, `${folderName}.zip`);
   };
 
@@ -1877,7 +1888,9 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                       {batchResults.map((res, idx) => (
                         <div key={idx} className="flex-shrink-0 w-32 relative group">
                           {res.url ? (
-                            <img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" />
+                            <a href={res.url} target="_blank" rel="noopener noreferrer">
+                              <img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" />
+                            </a>
                           ) : (
                             <div className="w-full h-full bg-slate-100 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
                               <span className={`text-[9px] ${res.error ? 'text-red-500' : 'text-slate-400'} font-black uppercase leading-tight cursor-help`} title={res.error}>
