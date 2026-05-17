@@ -532,6 +532,24 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     }
   };
 
+  // Tải ảnh Pollinations về base64 ngay lúc render — để ZIP không bị trắng
+  const fetchToBase64 = async (url: string): Promise<string> => {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(40000) });
+      if (!response.ok) throw new Error('Fetch failed');
+      const blob = await response.blob();
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (err) {
+      console.warn('[fetchToBase64] Không tải được ảnh, giữ URL gốc:', err);
+      return url; // fallback giữ URL gốc
+    }
+  };
+
   const downloadImageFile = (url: string, filename: string) => {
     const a = document.createElement('a');
     a.href = url;
@@ -549,8 +567,15 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     const folder = zip.folder(folderName);
     if (!folder) return;
     for (let i = 0; i < targetResults.length; i++) {
-      const imgData = targetResults[i].url.split(',')[1];
-      folder.file(`Scene_${i+1}.png`, imgData, {base64: true});
+      let imgUrl = targetResults[i].url;
+      // Nếu vẫn là URL thẳng (Pollinations chưa fetch) → tải về base64 trước khi ZIP
+      if (imgUrl.startsWith('http')) {
+        imgUrl = await fetchToBase64(imgUrl);
+      }
+      const imgData = imgUrl.split(',')[1];
+      if (imgData) {
+        folder.file(`Scene_${i+1}.png`, imgData, {base64: true});
+      }
     }
     const content = await zip.generateAsync({type: "blob"});
     saveAs(content, `${folderName}.zip`);
@@ -1306,8 +1331,8 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             try {
               // Show Rendering status
         
-              const freeRes = await generateImageFree(finalPrompt, refImage || undefined, undefined, undefined, validationResult.effectiveApiKeys);
-              imageUrl = freeRes.url;
+              const freeRes = await generateImageFree(finalPrompt);
+              imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
               console.warn("[Batch] Free image gen failed/returned empty, falling back:", freeErr);
@@ -1406,8 +1431,8 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       let imageUrl: string;
       if (profile.use_free_image_gen) {
         try {
-          const freeRes = await generateImageFree(finalPrompt, refImage || undefined, undefined, undefined, validationResult.effectiveApiKeys);
-          imageUrl = freeRes.url;
+          const freeRes = await generateImageFree(finalPrompt);
+          imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
           if (!imageUrl) throw new Error("Empty URL from free gen");
         } catch (freeErr) {
           console.warn("[Regen] Free image gen failed, falling back to Gemini:", freeErr);
@@ -1483,8 +1508,8 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           let imageUrl: string;
           if (profile.use_free_image_gen) {
             try {
-              const freeRes = await generateImageFree(finalPrompt, refImage || undefined, undefined, undefined, validationResult.effectiveApiKeys);
-              imageUrl = freeRes.url;
+              const freeRes = await generateImageFree(finalPrompt);
+              imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
               console.warn("[Regen Selected] Free image gen failed, falling back to Gemini:", freeErr);
