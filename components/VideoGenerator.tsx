@@ -44,8 +44,6 @@ interface VideoGeneratorProps {
   phone: string;
   projectName: string;
   apiKeys: string[];
-  adminFreeKeys?: string[];
-  adminPaidKeys?: string[];
   hasApiKey: boolean;
   onOpenKeyPicker: () => void;
   deductCredit: (amount: number, action?: any) => Promise<boolean>;
@@ -107,7 +105,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
   batchResults, setBatchResults,
   outputLanguage, setOutputLanguage, userPlan, credit,
   email,
-  apiKeys, adminFreeKeys = [], adminPaidKeys = [], hasApiKey, onOpenKeyPicker, useProjectKey, deductCredit
+  apiKeys, hasApiKey, onOpenKeyPicker, useProjectKey, deductCredit
 }) => {
   /**
    * Production-ready validation and credit/limit check.
@@ -534,29 +532,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     }
   };
 
-  // Tải ảnh Pollinations về base64 ngay lúc render — để ZIP không bị trắng
-  const fetchToBase64 = async (url: string): Promise<string> => {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(40000) });
-      if (!response.ok) throw new Error('Fetch failed');
-      const blob = await response.blob();
-      return await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } catch (err) {
-      console.warn('[fetchToBase64] Không tải được ảnh, giữ URL gốc:', err);
-      return url; // fallback giữ URL gốc
-    }
-  };
-
   const downloadImageFile = (url: string, filename: string) => {
-    if (url.startsWith('http')) {
-      window.open(url, '_blank', 'noopener,noreferrer');
-      return;
-    }
     const a = document.createElement('a');
     a.href = url;
     a.download = `${filename}.png`;
@@ -573,16 +549,8 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     const folder = zip.folder(folderName);
     if (!folder) return;
     for (let i = 0; i < targetResults.length; i++) {
-      let imgUrl = targetResults[i].url;
-      // Nếu vẫn là URL thẳng (Pollinations chưa fetch) → tải về base64 trước khi ZIP
-      if (imgUrl.startsWith('http')) {
-        // URL thẳng → bỏ qua
-        continue;
-      }
-      const imgData = imgUrl.split(',')[1];
-      if (imgData) {
-        folder.file(`Scene_${i+1}.png`, imgData, {base64: true});
-      }
+      const imgData = targetResults[i].url.split(',')[1];
+      folder.file(`Scene_${i+1}.png`, imgData, {base64: true});
     }
     const content = await zip.generateAsync({type: "blob"});
     saveAs(content, `${folderName}.zip`);
@@ -1353,9 +1321,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                   aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                   refImage || undefined,
                   outputLanguage,
-                  validationResult.effectiveUseProjectKey,
-                  adminFreeKeys,
-                  adminPaidKeys
+                  validationResult.effectiveUseProjectKey
                 );
               } else {
                 throw new Error("Free image generation failed and no personal API key provided.", { cause: freeErr });
@@ -1373,9 +1339,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                 aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                 refImage || undefined,
                 outputLanguage,
-                validationResult.effectiveUseProjectKey,
-                adminFreeKeys,
-                adminPaidKeys
+                validationResult.effectiveUseProjectKey
               );
             }
 
@@ -1454,9 +1418,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
             refImage || undefined,
             outputLanguage,
-            validationResult.effectiveUseProjectKey,
-            adminFreeKeys,
-            adminPaidKeys
+            validationResult.effectiveUseProjectKey
           );
         }
       } else {
@@ -1467,9 +1429,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
           refImage || undefined,
           outputLanguage,
-          validationResult.effectiveUseProjectKey,
-          adminFreeKeys,
-          adminPaidKeys
+          validationResult.effectiveUseProjectKey
         );
       }
 
@@ -1535,9 +1495,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                 aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                 refImage || undefined,
                 outputLanguage,
-                validationResult.effectiveUseProjectKey,
-                adminFreeKeys,
-                adminPaidKeys
+                validationResult.effectiveUseProjectKey
               );
             }
           } else {
@@ -1869,7 +1827,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                       {batchResults.map((res, idx) => (
                         <div key={idx} className="flex-shrink-0 w-32 relative group">
                           {res.url ? (
-                            <a href={res.url} target="_blank" rel="noopener noreferrer"><img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" /></a>
+                            <img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" />
                           ) : (
                             <div className="w-full h-full bg-slate-100 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
                               <span className={`text-[9px] ${res.error ? 'text-red-500' : 'text-slate-400'} font-black uppercase leading-tight cursor-help`} title={res.error}>
