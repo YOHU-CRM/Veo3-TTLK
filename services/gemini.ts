@@ -703,7 +703,7 @@ export const generateImageFree = async (
       });
       if (pixazoRes.ok) {
         const pixData = await pixazoRes.json();
-        const imgUrl = pixData?.output?.media_url?.[0] || pixData?.url || pixData?.image_url;
+        const imgUrl = (typeof pixData?.output === 'string' ? pixData.output : pixData?.output?.media_url?.[0]) || pixData?.url || pixData?.image_url;
         if (imgUrl) return { url: imgUrl, directUrl: true };
       } else {
         console.warn('[FreeImg] Pixazo lỗi:', pixazoRes.status);
