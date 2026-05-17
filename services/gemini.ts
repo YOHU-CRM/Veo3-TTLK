@@ -395,7 +395,7 @@ export const generateGeminiText = async (
     const apiKey = uniqueKeys[i];
     const ai = new GoogleGenAI({ apiKey });
     
-    const models = ['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemini-flash-latest'];
+    const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-1.5-flash']; // ✅ Models text đúng tháng 5/2026
     
     for (const modelName of models) {
       try {
@@ -492,10 +492,14 @@ export const generateGeminiImage = async (
     const ai = new GoogleGenAI({ apiKey });
     
     // Recommended models for image generation from skill
+    // ✅ Thứ tự: paid tốt nhất → fallback rẻ hơn
+    // gemini-3.1-flash-image-preview: $0.067/ảnh, ref image ✅, chất lượng cao nhất
+    // gemini-2.5-flash-image: $0.039/ảnh, ref image ✅, fallback
+    // imagen-4.0-fast-generate-001: $0.02/ảnh, nhanh, KHÔNG có ref image
     const models = [
       'gemini-3.1-flash-image-preview',
-      'gemini-3-pro-image-preview',
-      'gemini-2.5-flash-image'
+      'gemini-2.5-flash-image',
+      'imagen-4.0-fast-generate-001',
     ];
     
     for (const modelName of models) {
@@ -519,22 +523,24 @@ export const generateGeminiImage = async (
             }
             parts.push({ text: finalPrompt });
 
-            // For Gemini models, we might need different modalities if they support generation
-            const isGemini = modelName.includes('gemini');
+            // gemini-3.1-flash-image-preview / gemini-2.5-flash-image: dùng responseModalities TEXT+IMAGE
+            // imagen-4.0-fast-generate-001: dùng imageConfig với aspectRatio
+            const isGeminiNative = modelName.startsWith('gemini');
             
             const response = await ai.models.generateContent({
               model: modelName,
               contents: [{ role: 'user', parts: parts }],
-              config: isGemini ? {
-                // gemini-2.0-flash can sometimes generate images if properly prompted and supported
-                responseModalities: [Modality.IMAGE],
+              config: isGeminiNative ? {
+                // ✅ Gemini native image models cần TEXT+IMAGE (chỉ IMAGE sẽ bị lỗi)
+                responseModalities: [Modality.TEXT, Modality.IMAGE],
                 safetySettings: [
                   { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
                   { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
                   { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
                   { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
                 ]
-              } : { 
+              } : {
+                // ✅ Imagen 4 models dùng imageConfig
                 systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
                 imageConfig: { aspectRatio: aspectRatio === "16:9" ? "16:9" : "9:16" },
                 safetySettings: [
@@ -606,17 +612,102 @@ export const generateGeminiImage = async (
   throw lastError;
 };
 
-export const generateImageFree = async (prompt: string) => {
+// ================================================================
+// FREE IMAGE GENERATION — Tháng 5/2026
+// Ưu tiên 1: Pixazo FLUX Schnell (free tier → $0.0012/ảnh, KHÔNG ref image)
+// Ưu tiên 2: SiliconFlow FLUX.1 Kontext Dev ($0.015/ảnh, CÓ ref image)
+// Fallback:  Pollinations flux-realism (miễn phí, không cần key)
+//            → CHỈ TRẢ URL, không fetch/download → không bao giờ timeout trên Vercel
+// Người dùng nhập key vào tool → tự động dùng đúng API
+// ================================================================
+export const generateImageFree = async (
+  prompt: string,
+  refImageBase64?: string,       // ảnh tham chiếu (base64) nếu có
+  pixazoApiKey?: string,         // key Pixazo (free tier hoặc trả phí)
+  siliconflowApiKey?: string,    // key SiliconFlow cho ref image
+  userApiKeys: string[] = []     // keys người dùng nhập vào tool
+): Promise<{ url: string; directUrl?: boolean; base64?: boolean }> => {
+  const seed = Math.floor(Math.random() * 9999999);
+
+  // Lấy keys từ env hoặc từ danh sách người dùng nhập
+  const resolveEnvKey = (envName: string) =>
+    (typeof import.meta !== 'undefined' ? (import.meta as any).env?.[envName] : undefined) ||
+    (typeof process !== 'undefined' ? process.env?.[envName] : undefined);
+
+  const pixazoKey = pixazoApiKey || resolveEnvKey('VITE_PIXAZO_API_KEY') ||
+    userApiKeys.find(k => k.startsWith('pxz-') || k.startsWith('pixazo-'));
+
+  const sfKey = siliconflowApiKey || resolveEnvKey('VITE_SILICONFLOW_API_KEY') ||
+    userApiKeys.find(k => k.startsWith('sk-') && k.length > 30);
+
+  // ── Ưu tiên 1a: Có ảnh tham chiếu → SiliconFlow FLUX.1 Kontext Dev ($0.015/ảnh) ──
+  if (refImageBase64 && sfKey) {
+    try {
+      const rawB64 = refImageBase64.includes(',') ? refImageBase64.split(',')[1] : refImageBase64;
+      const sfRes = await fetch('https://api.siliconflow.cn/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sfKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'black-forest-labs/FLUX.1-Kontext-dev',
+          prompt: prompt,
+          image: `data:image/png;base64,${rawB64}`,
+          image_size: '1024x1024',
+          num_inference_steps: 28,
+          seed: seed,
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (sfRes.ok) {
+        const sfData = await sfRes.json();
+        const imgUrl = sfData?.images?.[0]?.url || sfData?.data?.[0]?.url;
+        if (imgUrl) return { url: imgUrl, directUrl: true };
+      } else {
+        console.warn('[FreeImg] SiliconFlow lỗi:', sfRes.status);
+      }
+    } catch (err) {
+      console.warn('[FreeImg] SiliconFlow thất bại:', err);
+    }
+  }
+
+  // ── Ưu tiên 1b: Không có ref image → Pixazo FLUX Schnell ($0.0012/ảnh) ──
+  if (pixazoKey) {
+    try {
+      const pixazoRes = await fetch('https://gateway.pixazo.ai/flux-1-schnell/v1/getData', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Ocp-Apim-Subscription-Key': pixazoKey,
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          width: 1024,
+          height: 1024,
+          seed: seed,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (pixazoRes.ok) {
+        const pixData = await pixazoRes.json();
+        const imgUrl = pixData?.output?.media_url?.[0] || pixData?.url || pixData?.image_url;
+        if (imgUrl) return { url: imgUrl, directUrl: true };
+      } else {
+        console.warn('[FreeImg] Pixazo lỗi:', pixazoRes.status);
+      }
+    } catch (err) {
+      console.warn('[FreeImg] Pixazo thất bại, chuyển Pollinations:', err);
+    }
+  }
+
+  // ── Fallback: Pollinations flux-realism (miễn phí, không cần key) ──
+  // QUAN TRỌNG: Chỉ trả URL thẳng — KHÔNG fetch/download
+  // Vercel timeout nếu fetch ảnh về server, Pollinations cần 15-30s render
+  // <img src=URL> tự load phía client → không bao giờ timeout
   const encodedPrompt = encodeURIComponent(prompt);
-  const seed = Math.floor(Math.random() * 1000000);
-  const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${seed}`;
-  
-  // Synthetic delay to allow Flux model to "render" on their end and show feedback in UI
-  return { url: imageUrl, directUrl: true }; 
-  
-  // Trigger generation by pinging the URL (pollinations generates on GET)
-  
-  return { url: imageUrl };
+  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=1024&height=1024&nologo=true&seed=${seed}&enhance=true`;
+  return { url: pollinationsUrl, directUrl: true };
 };
 
 export const generateGeminiVoice = async (
@@ -706,7 +797,7 @@ TEXT: ${segmentText}`;
         const voiceName = chunk.gender === 'MALE' ? 'Fenrir' : 'Kore'; // Fenrir is deeper and stronger
         
         const response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-tts-preview",
+          model: "gemini-2.5-flash-preview-tts", // ✅ TTS model đúng tháng 5/2026
           contents: [{ role: 'user', parts: [{ text: promptText }] }],
           config: {
             responseModalities: [Modality.AUDIO],
