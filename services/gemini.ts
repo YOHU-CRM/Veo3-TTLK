@@ -648,7 +648,11 @@ export const generateGeminiImage = async (
       }
     }
   }
-  throw lastError;
+  // Hết tất cả Gemini key → fallback Pixazo/SiliconFlow/Pollinations
+  // Không báo lỗi thẳng → user vẫn nhận được ảnh
+  console.warn('[GeminiImage] Tất cả key hết quota, fallback generateImageFree...');
+  const freeRes = await generateImageFree(prompt);
+  return freeRes.url;
 };
 
 // ================================================================
@@ -714,26 +718,26 @@ export const generateImageFree = async (
   // ── Ưu tiên 1b: Không có ref image → Pixazo FLUX Schnell ($0.0012/ảnh) ──
   if (pixazoKey) {
     try {
-      const pixazoRes = await fetch('https://gateway.pixazo.ai/flux-1-schnell/v1/getData', {
+      const pixazoRes = await fetch('https://api.pixazo.ai/v1/images/generations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Ocp-Apim-Subscription-Key': pixazoKey,
+          'Authorization': `Bearer ${pixazoKey}`,
         },
         body: JSON.stringify({
+          model: 'flux-schnell',
           prompt: prompt,
-          width: 1024,
-          height: 1024,
-          seed: seed,
+          n: 1,
+          size: '1024x1024',
         }),
         signal: AbortSignal.timeout(30000),
       });
       if (pixazoRes.ok) {
         const pixData = await pixazoRes.json();
-        const imgUrl = pixData?.output?.media_url?.[0] || pixData?.url || pixData?.image_url;
+        const imgUrl = pixData?.data?.[0]?.url || pixData?.images?.[0]?.url;
         if (imgUrl) return { url: imgUrl, directUrl: true };
       } else {
-        console.warn('[FreeImg] Pixazo lỗi:', pixazoRes.status);
+        console.warn('[FreeImg] Pixazo lỗi:', pixazoRes.status, await pixazoRes.text().catch(() => ''));
       }
     } catch (err) {
       console.warn('[FreeImg] Pixazo thất bại, chuyển Pollinations:', err);
