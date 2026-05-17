@@ -619,7 +619,13 @@ export const generateGeminiImage = async (
               return await executeWithRetry();
             }
             throw error;
-          }
+
+
+
+
+
+
+
         };
 
         return await executeWithRetry();
@@ -745,7 +751,7 @@ export const generateImageFree = async (
   // Vercel timeout nếu fetch ảnh về server, Pollinations cần 15-30s render
   // <img src=URL> tự load phía client → không bao giờ timeout
   const encodedPrompt = encodeURIComponent(prompt);
-  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=1024&height=1024&nologo=true&seed=${seed}&enhance=true`;
+  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=1280&height=720&nologo=true&seed=${seed}&enhance=true&quality=high`;
   return { url: pollinationsUrl, directUrl: true };
 };
 
