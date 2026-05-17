@@ -553,10 +553,6 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
   };
 
   const downloadImageFile = (url: string, filename: string) => {
-    if (url.startsWith('http')) {
-      window.open(url, '_blank', 'noopener,noreferrer');
-      return;
-    }
     const a = document.createElement('a');
     a.href = url;
     a.download = `${filename}.png`;
@@ -576,8 +572,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       let imgUrl = targetResults[i].url;
       // Nếu vẫn là URL thẳng (Pollinations chưa fetch) → tải về base64 trước khi ZIP
       if (imgUrl.startsWith('http')) {
-        // URL thẳng → bỏ qua
-        continue;
+        imgUrl = await fetchToBase64(imgUrl);
       }
       const imgData = imgUrl.split(',')[1];
       if (imgData) {
@@ -1339,7 +1334,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
               // Show Rendering status
         
               const freeRes = await generateImageFree(finalPrompt);
-              imageUrl = freeRes.url;
+              imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
               console.warn("[Batch] Free image gen failed/returned empty, falling back:", freeErr);
@@ -1443,7 +1438,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       if (profile.use_free_image_gen) {
         try {
           const freeRes = await generateImageFree(finalPrompt);
-          imageUrl = freeRes.url;
+          imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
           if (!imageUrl) throw new Error("Empty URL from free gen");
         } catch (freeErr) {
           console.warn("[Regen] Free image gen failed, falling back to Gemini:", freeErr);
@@ -1524,7 +1519,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           if (profile.use_free_image_gen) {
             try {
               const freeRes = await generateImageFree(finalPrompt);
-              imageUrl = freeRes.url;
+              imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
               console.warn("[Regen Selected] Free image gen failed, falling back to Gemini:", freeErr);
@@ -1869,7 +1864,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                       {batchResults.map((res, idx) => (
                         <div key={idx} className="flex-shrink-0 w-32 relative group">
                           {res.url ? (
-                            <a href={res.url} target="_blank" rel="noopener noreferrer"><img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" /></a>
+                            <img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" />
                           ) : (
                             <div className="w-full h-full bg-slate-100 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
                               <span className={`text-[9px] ${res.error ? 'text-red-500' : 'text-slate-400'} font-black uppercase leading-tight cursor-help`} title={res.error}>
