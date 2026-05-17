@@ -534,42 +534,31 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     }
   };
 
-  // Convert URL → base64 qua canvas (bypass CORS, không bị 402)
-  const urlToBase64ViaCanvas = (url: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || 1024;
-        canvas.height = img.naturalHeight || 1024;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.onerror = () => resolve(url); // fallback giữ URL gốc
-      img.src = url;
-    });
-  };
-
-  // fetchToBase64 dùng canvas thay vì fetch — không bị 402/CORS
-  const fetchToBase64 = (url: string): Promise<string> => {
-    if (!url.startsWith('http')) return Promise.resolve(url);
-    return urlToBase64ViaCanvas(url);
-  };
-
-  const downloadImageFile = async (url: string, filename: string) => {
-    let dataUrl = url;
-    if (url.startsWith('http')) {
-      dataUrl = await urlToBase64ViaCanvas(url);
+  // Tải ảnh Pollinations về base64 ngay lúc render — để ZIP không bị trắng
+  const fetchToBase64 = async (url: string): Promise<string> => {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(40000) });
+      if (!response.ok) throw new Error('Fetch failed');
+      const blob = await response.blob();
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (err) {
+      console.warn('[fetchToBase64] Không tải được ảnh, giữ URL gốc:', err);
+      return url; // fallback giữ URL gốc
     }
-    // Nếu canvas vẫn trả về URL (CORS fail) → mở tab mới
-    if (dataUrl.startsWith('http')) {
-      window.open(dataUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const downloadImageFile = (url: string, filename: string) => {
+    if (url.startsWith('http')) {
+      window.open(url, '_blank', 'noopener,noreferrer');
       return;
     }
     const a = document.createElement('a');
-    a.href = dataUrl;
+    a.href = url;
     a.download = `${filename}.png`;
     document.body.appendChild(a);
     a.click();
@@ -583,27 +572,18 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     const folderName = `YOHU_PRO_BATCH_${Date.now()}`;
     const folder = zip.folder(folderName);
     if (!folder) return;
-
-    const urlLinks: string[] = [];
-
     for (let i = 0; i < targetResults.length; i++) {
-      const imgUrl = targetResults[i].url;
-      if (imgUrl.startsWith('data:')) {
-        // base64 → lưu thẳng vào ZIP
-        const imgData = imgUrl.split(',')[1];
-        if (imgData) folder.file(`Scene_${i+1}.png`, imgData, { base64: true });
-      } else {
-        // URL thẳng → ghi vào links.txt, không fetch
-        urlLinks.push(`Scene_${i+1}: ${imgUrl}`);
+      let imgUrl = targetResults[i].url;
+      // Nếu vẫn là URL thẳng (Pollinations chưa fetch) → tải về base64 trước khi ZIP
+      if (imgUrl.startsWith('http')) {
+        imgUrl = await fetchToBase64(imgUrl);
+      }
+      const imgData = imgUrl.split(',')[1];
+      if (imgData) {
+        folder.file(`Scene_${i+1}.png`, imgData, {base64: true});
       }
     }
-
-    // Nếu có URL thẳng → thêm file links.txt vào ZIP
-    if (urlLinks.length > 0) {
-      folder.file('image_links.txt', urlLinks.join('\n'));
-    }
-
-    const content = await zip.generateAsync({ type: 'blob' });
+    const content = await zip.generateAsync({type: "blob"});
     saveAs(content, `${folderName}.zip`);
   };
 
@@ -1888,9 +1868,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                       {batchResults.map((res, idx) => (
                         <div key={idx} className="flex-shrink-0 w-32 relative group">
                           {res.url ? (
-                            <a href={res.url} target="_blank" rel="noopener noreferrer">
-                              <img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" />
-                            </a>
+                            <a href={res.url} target="_blank" rel="noopener noreferrer"><img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" /></a>
                           ) : (
                             <div className="w-full h-full bg-slate-100 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
                               <span className={`text-[9px] ${res.error ? 'text-red-500' : 'text-slate-400'} font-black uppercase leading-tight cursor-help`} title={res.error}>
