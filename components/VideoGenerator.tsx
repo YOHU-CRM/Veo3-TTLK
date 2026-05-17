@@ -535,24 +535,37 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
   };
 
   // Tải ảnh Pollinations về base64 ngay lúc render — để ZIP không bị trắng
-  const fetchToBase64 = async (url: string): Promise<string> => {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(40000) });
-      if (!response.ok) throw new Error('Fetch failed');
-      const blob = await response.blob();
-      return await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } catch (err) {
-      console.warn('[fetchToBase64] Không tải được ảnh, giữ URL gốc:', err);
-      return url; // fallback giữ URL gốc
+  const fetchToBase64 = async (url: string, retries = 3): Promise<string> => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        // Delay tăng dần giữa các lần retry để tránh rate limit
+        if (attempt > 1) await new Promise(r => setTimeout(r, attempt * 3000));
+        const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        return await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (err) {
+        console.warn(`[fetchToBase64] Lần ${attempt}/${retries} thất bại:`, err);
+        if (attempt === retries) {
+          console.warn('[fetchToBase64] Giữ URL gốc:', url);
+          return url; // fallback giữ URL gốc
+        }
+      }
     }
+    return url;
   };
 
   const downloadImageFile = (url: string, filename: string) => {
+    if (url.startsWith('http')) {
+      // URL thẳng (Pollinations...) → mở tab mới để không mất state
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const a = document.createElement('a');
     a.href = url;
     a.download = `${filename}.png`;
