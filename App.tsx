@@ -63,6 +63,8 @@ const App: React.FC = () => {
 
   const [projectName, setProjectName] = useState(() => localStorage.getItem('veopro_project_name') || '');
   const [adminAllKeys, setAdminAllKeys] = useState<string[]>([]);
+  const [adminFreeKeys, setAdminFreeKeys] = useState<string[]>([]);
+  const [adminPaidKeys, setAdminPaidKeys] = useState<string[]>([]);
   const [apiKeys, setApiKeys] = useState<string[]>(() => {
     const saved = localStorage.getItem('veopro_api_keys');
     return saved ? JSON.parse(saved) : [];
@@ -128,6 +130,9 @@ const App: React.FC = () => {
         const adminKeysResult = await googleSheetService.getAdminKeys();
         if (adminKeysResult.keys && Array.isArray(adminKeysResult.keys)) {
           setAdminAllKeys(adminKeysResult.keys);
+          // Lưu riêng free và paid để dùng đúng thứ tự ưu tiên
+          setAdminFreeKeys(adminKeysResult.freeKeys || []);
+          setAdminPaidKeys(adminKeysResult.paidKeys || []);
         }
       }
 
@@ -465,6 +470,8 @@ const App: React.FC = () => {
           phone={phone}
           projectName={projectName}
           apiKeys={profile.role === 'admin' ? [...apiKeys, ...adminAllKeys] : apiKeys}
+          adminFreeKeys={adminFreeKeys}
+          adminPaidKeys={adminPaidKeys}
           hasApiKey={hasApiKey}
           onOpenKeyPicker={handleOpenKeyPicker}
           deductCredit={deductCredit}
