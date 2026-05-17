@@ -45,7 +45,21 @@ const App: React.FC = () => {
   const [directorScript, setDirectorScript] = useState(() => localStorage.getItem('veopro_director_script') || '');
   const [seamlessScript, setSeamlessScript] = useState(() => localStorage.getItem('veopro_seamless_script') || '');
   const [targetLink, setTargetLink] = useState(() => localStorage.getItem('veopro_target_link') || '');
-  const [batchResults, setBatchResults] = useState<any[]>([]);
+  const [batchResults, setBatchResults] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('veopro_batch_results');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  // Tự động lưu batchResults vào localStorage khi thay đổi
+  React.useEffect(() => {
+    try {
+      // Chỉ lưu các ảnh đã có URL (bỏ qua ảnh đang render)
+      const toSave = batchResults.filter(r => r.url);
+      localStorage.setItem('veopro_batch_results', JSON.stringify(toSave));
+    } catch { /* bỏ qua nếu localStorage đầy */ }
+  }, [batchResults]);
 
   const [email, setEmail] = useState(() => localStorage.getItem('currentUserEmail') || '');
   const [phone, setPhone] = useState(() => localStorage.getItem('currentUserPhone') || '');
