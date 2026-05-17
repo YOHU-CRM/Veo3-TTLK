@@ -51,6 +51,32 @@ export const processKeys = (keys: string[]): string[] => {
   return Array.from(new Set(allFoundKeys)).filter(k => k && k.length > 20 && !k.toLowerCase().includes('placeholder'));
 };
 
+// ── resolveImageKeys: Dùng riêng cho tạo ảnh (FREE IMG = OFF) ──
+// Thứ tự: freeKeys trước → paidKeys sau → không trộn lẫn
+// Chuyển key ngay khi lỗi 429, không chờ retry
+export const resolveImageKeys = (
+  userApiKeys: string[],
+  adminFreeKeys: string[],
+  adminPaidKeys: string[]
+): { freeKeys: string[]; paidKeys: string[] } => {
+  const userKeys = processKeys(userApiKeys);
+
+  // Env free keys
+  const envFree = [
+    import.meta.env.VITE_GEMINI_FREE_KEYS,
+  ].flatMap(v => v ? v.split(',').map((k: string) => k.trim()).filter(Boolean) : []);
+
+  // Env paid keys
+  const envPaid = [
+    import.meta.env.VITE_GEMINI_PAID_KEYS,
+  ].flatMap(v => v ? v.split(',').map((k: string) => k.trim()).filter(Boolean) : []);
+
+  const allFree = Array.from(new Set([...processKeys(envFree), ...adminFreeKeys]));
+  const allPaid = Array.from(new Set([...userKeys, ...processKeys(envPaid), ...adminPaidKeys]));
+
+  return { freeKeys: allFree, paidKeys: allPaid };
+};
+
 const resolveKeys = (apiKeys: string[], useProjectKey: boolean): string[] => {
   const envValues = [
     import.meta.env.VITE_GEMINI_API_KEY,
@@ -472,9 +498,21 @@ export const generateGeminiImage = async (
   aspectRatio: "16:9" | "9:16",
   refImage?: string,
   lang: 'EN' | 'VN' = 'EN',
-  useProjectKey: boolean = true
+  useProjectKey: boolean = true,
+  adminFreeKeys: string[] = [],
+  adminPaidKeys: string[] = []
 ): Promise<string> => {
-  const uniqueKeys = resolveKeys(apiKeys, useProjectKey);
+  // ── Tách rõ free keys và paid keys ──────────────────────────
+  const { freeKeys, paidKeys } = resolveImageKeys(apiKeys, adminFreeKeys, adminPaidKeys);
+
+  // Thứ tự: free trước → paid sau → không trộn lẫn
+  // Nếu không có free/paid từ sheet → fallback dùng resolveKeys cũ
+  const orderedKeys = freeKeys.length > 0 || paidKeys.length > 0
+    ? [...freeKeys, ...paidKeys]
+    : resolveKeys(apiKeys, useProjectKey);
+
+  const uniqueKeys = Array.from(new Set(orderedKeys)).filter(Boolean);
+  const freeKeySet = new Set(freeKeys);
   
   if (uniqueKeys.length === 0) {
     const error = new Error("API Key missing. Please select an API key to continue.");
@@ -574,13 +612,20 @@ export const generateGeminiImage = async (
             const isQuota = errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota") || errorMsg.includes("credits are depleted");
             const isUnavailable = errorMsg.includes("503") || errorMsg.includes("UNAVAILABLE") || errorMsg.includes("high demand");
             
-            if ((isQuota || isUnavailable) && retryCount < maxRetries) {
+            const isFreeKey = freeKeySet.has(apiKey);
+            if (!isFreeKey && (isQuota || isUnavailable) && retryCount < maxRetries) {
               retryCount++;
               await sleep(isQuota ? 3000 : 1000);
               return await executeWithRetry();
             }
             throw error;
-          }
+
+
+
+
+
+
+
         };
 
         return await executeWithRetry();
@@ -634,22 +679,10 @@ export const generateImageFree = async (
     (typeof import.meta !== 'undefined' ? (import.meta as any).env?.[envName] : undefined) ||
     (typeof process !== 'undefined' ? process.env?.[envName] : undefined);
 
-  // Hỗ trợ nhiều key cách nhau bằng dấu phẩy → chọn random 1 key
-  const resolveEnvKeys = (envName: string): string[] => {
-    const raw = resolveEnvKey(envName);
-    if (!raw) return [];
-    return raw.split(',').map((k: string) => k.trim()).filter(Boolean);
-  };
-  const pickRandom = (keys: string[]): string | undefined =>
-    keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : undefined;
-
-  const pixazoKeys = resolveEnvKeys('VITE_PIXAZO_API_KEY');
-  const sfKeys = resolveEnvKeys('VITE_SILICONFLOW_API_KEY');
-
-  const pixazoKey = pixazoApiKey || pickRandom(pixazoKeys) ||
+  const pixazoKey = pixazoApiKey || resolveEnvKey('VITE_PIXAZO_API_KEY') ||
     userApiKeys.find(k => k.startsWith('pxz-') || k.startsWith('pixazo-'));
 
-  const sfKey = siliconflowApiKey || pickRandom(sfKeys) ||
+  const sfKey = siliconflowApiKey || resolveEnvKey('VITE_SILICONFLOW_API_KEY') ||
     userApiKeys.find(k => k.startsWith('sk-') && k.length > 30);
 
   // ── Ưu tiên 1a: Có ảnh tham chiếu → SiliconFlow FLUX.1 Kontext Dev ($0.015/ảnh) ──
@@ -703,7 +736,7 @@ export const generateImageFree = async (
       });
       if (pixazoRes.ok) {
         const pixData = await pixazoRes.json();
-        const imgUrl = (typeof pixData?.output === 'string' ? pixData.output : pixData?.output?.media_url?.[0]) || pixData?.url || pixData?.image_url;
+        const imgUrl = pixData?.output?.media_url?.[0] || pixData?.url || pixData?.image_url;
         if (imgUrl) return { url: imgUrl, directUrl: true };
       } else {
         console.warn('[FreeImg] Pixazo lỗi:', pixazoRes.status);
