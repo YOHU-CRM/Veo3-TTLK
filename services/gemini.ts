@@ -619,13 +619,7 @@ export const generateGeminiImage = async (
               return await executeWithRetry();
             }
             throw error;
-
-
-            }
-
-
-
-
+          }
         };
 
         return await executeWithRetry();
