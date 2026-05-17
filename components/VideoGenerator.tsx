@@ -44,6 +44,8 @@ interface VideoGeneratorProps {
   phone: string;
   projectName: string;
   apiKeys: string[];
+  adminFreeKeys?: string[];
+  adminPaidKeys?: string[];
   hasApiKey: boolean;
   onOpenKeyPicker: () => void;
   deductCredit: (amount: number, action?: any) => Promise<boolean>;
@@ -105,7 +107,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
   batchResults, setBatchResults,
   outputLanguage, setOutputLanguage, userPlan, credit,
   email,
-  apiKeys, hasApiKey, onOpenKeyPicker, useProjectKey, deductCredit
+  apiKeys, adminFreeKeys = [], adminPaidKeys = [], hasApiKey, onOpenKeyPicker, useProjectKey, deductCredit
 }) => {
   /**
    * Production-ready validation and credit/limit check.
@@ -1346,7 +1348,9 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                   aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                   refImage || undefined,
                   outputLanguage,
-                  validationResult.effectiveUseProjectKey
+                  validationResult.effectiveUseProjectKey,
+                  adminFreeKeys,
+                  adminPaidKeys
                 );
               } else {
                 throw new Error("Free image generation failed and no personal API key provided.", { cause: freeErr });
@@ -1364,7 +1368,9 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                 aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                 refImage || undefined,
                 outputLanguage,
-                validationResult.effectiveUseProjectKey
+                validationResult.effectiveUseProjectKey,
+                adminFreeKeys,
+                adminPaidKeys
               );
             }
 
@@ -1443,7 +1449,9 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
             refImage || undefined,
             outputLanguage,
-            validationResult.effectiveUseProjectKey
+            validationResult.effectiveUseProjectKey,
+            adminFreeKeys,
+            adminPaidKeys
           );
         }
       } else {
@@ -1454,7 +1462,9 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
           refImage || undefined,
           outputLanguage,
-          validationResult.effectiveUseProjectKey
+          validationResult.effectiveUseProjectKey,
+          adminFreeKeys,
+          adminPaidKeys
         );
       }
 
@@ -1520,7 +1530,9 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                 aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                 refImage || undefined,
                 outputLanguage,
-                validationResult.effectiveUseProjectKey
+                validationResult.effectiveUseProjectKey,
+                adminFreeKeys,
+                adminPaidKeys
               );
             }
           } else {
