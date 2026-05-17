@@ -621,7 +621,7 @@ export const generateGeminiImage = async (
             throw error;
 
 
-
+            }
 
 
 
