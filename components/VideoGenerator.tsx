@@ -576,7 +576,8 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       let imgUrl = targetResults[i].url;
       // Nếu vẫn là URL thẳng (Pollinations chưa fetch) → tải về base64 trước khi ZIP
       if (imgUrl.startsWith('http')) {
-        imgUrl = await fetchToBase64(imgUrl);
+        // URL thẳng → bỏ qua
+        continue;
       }
       const imgData = imgUrl.split(',')[1];
       if (imgData) {
@@ -1338,7 +1339,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
               // Show Rendering status
         
               const freeRes = await generateImageFree(finalPrompt);
-              imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
+              imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
               console.warn("[Batch] Free image gen failed/returned empty, falling back:", freeErr);
@@ -1442,7 +1443,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       if (profile.use_free_image_gen) {
         try {
           const freeRes = await generateImageFree(finalPrompt);
-          imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
+          imageUrl = freeRes.url;
           if (!imageUrl) throw new Error("Empty URL from free gen");
         } catch (freeErr) {
           console.warn("[Regen] Free image gen failed, falling back to Gemini:", freeErr);
@@ -1523,7 +1524,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           if (profile.use_free_image_gen) {
             try {
               const freeRes = await generateImageFree(finalPrompt);
-              imageUrl = freeRes.url.startsWith("http") ? await fetchToBase64(freeRes.url) : freeRes.url;
+              imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
               console.warn("[Regen Selected] Free image gen failed, falling back to Gemini:", freeErr);
