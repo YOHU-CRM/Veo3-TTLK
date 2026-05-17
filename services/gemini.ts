@@ -634,10 +634,22 @@ export const generateImageFree = async (
     (typeof import.meta !== 'undefined' ? (import.meta as any).env?.[envName] : undefined) ||
     (typeof process !== 'undefined' ? process.env?.[envName] : undefined);
 
-  const pixazoKey = pixazoApiKey || resolveEnvKey('VITE_PIXAZO_API_KEY') ||
+  // Hỗ trợ nhiều key cách nhau bằng dấu phẩy → chọn random 1 key
+  const resolveEnvKeys = (envName: string): string[] => {
+    const raw = resolveEnvKey(envName);
+    if (!raw) return [];
+    return raw.split(',').map((k: string) => k.trim()).filter(Boolean);
+  };
+  const pickRandom = (keys: string[]): string | undefined =>
+    keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : undefined;
+
+  const pixazoKeys = resolveEnvKeys('VITE_PIXAZO_API_KEY');
+  const sfKeys = resolveEnvKeys('VITE_SILICONFLOW_API_KEY');
+
+  const pixazoKey = pixazoApiKey || pickRandom(pixazoKeys) ||
     userApiKeys.find(k => k.startsWith('pxz-') || k.startsWith('pixazo-'));
 
-  const sfKey = siliconflowApiKey || resolveEnvKey('VITE_SILICONFLOW_API_KEY') ||
+  const sfKey = siliconflowApiKey || pickRandom(sfKeys) ||
     userApiKeys.find(k => k.startsWith('sk-') && k.length > 30);
 
   // ── Ưu tiên 1a: Có ảnh tham chiếu → SiliconFlow FLUX.1 Kontext Dev ($0.015/ảnh) ──
