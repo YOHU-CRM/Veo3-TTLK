@@ -44,6 +44,8 @@ interface VideoGeneratorProps {
   phone: string;
   projectName: string;
   apiKeys: string[];
+  adminFreeKeys?: string[];
+  adminPaidKeys?: string[];
   hasApiKey: boolean;
   onOpenKeyPicker: () => void;
   deductCredit: (amount: number, action?: any) => Promise<boolean>;
@@ -58,6 +60,83 @@ enum ToolMode {
   IMAGE_GEN = 'IMAGE_GEN',
   BATCH_IMAGE_GEN = 'BATCH_IMAGE_GEN'
 }
+
+// ================================================================
+// TỰ ĐỘNG CHỌN ENGINE VIDEO THEO CHỦ ĐỀ
+// Seedance: mặc định (rẻ nhất)
+// Veo3: chủ đề phức tạp, hiệu ứng cao
+// Kling: CHỈ cảnh cực khó (nhân vật người phức tạp)
+// ================================================================
+const ENGINE_BY_STYLE: Record<string, 'veo' | 'kling' | 'seedance'> = {
+  hollywood: 'veo', action: 'veo', scifi: 'veo',
+  fantasy: 'veo', war: 'veo', cyberpunk: 'veo',
+  'k-drama': 'kling', romance: 'kling', noir: 'kling', thriller: 'kling',
+  documentary: 'seedance', vlog: 'seedance', review: 'seedance',
+  comedy: 'seedance', anime: 'seedance', disney: 'seedance',
+  vintage: 'seedance', musical: 'seedance',
+};
+const ENGINE_BY_GENRE: Record<string, 'veo' | 'kling' | 'seedance'> = {
+  love_story: 'kling', action: 'veo', 'sci-fi': 'veo',
+  thriller: 'kling', fantasy: 'veo', horror: 'veo',
+  drama: 'kling', romance: 'kling',
+  documentary: 'seedance', vlog: 'seedance', review: 'seedance', comedy: 'seedance', animation: 'seedance',
+};
+
+// Tự động chọn engine dựa vào style + genre + hasRefImage
+const autoSelectEngine = (
+  styleId: string,
+  genreId: string,
+  hasRefImage: boolean,
+  videoCount: number,      // số video đã tạo tháng này
+  isPro9: boolean
+): 'veo' | 'kling' | 'seedance' => {
+  // love_story + có ref image → Kling (tốt nhất cho nhân vật người)
+  if (genreId === 'love_story' && hasRefImage) return 'kling';
+
+  // Ưu tiên style trước, rồi genre
+  const byStyle = ENGINE_BY_STYLE[styleId];
+  const byGenre = ENGINE_BY_GENRE[genreId];
+  let engine = byStyle || byGenre || 'seedance';
+
+  // PRO9: hết 50 video → chỉ dùng Seedance
+  if (isPro9 && videoCount >= 50 && engine !== 'seedance') {
+    engine = 'seedance';
+  }
+
+  // Hạn chế Kling — chỉ dùng khi cực cần (có ref image)
+  if (engine === 'kling' && !hasRefImage) engine = 'veo';
+
+  return engine;
+};
+
+// Kiểm tra giới hạn PRO9 theo tháng (dựa vào ngày đăng ký)
+const checkPro9MonthlyLimit = (
+  regDate: string,
+  videoCount: number,
+  imageCount: number,
+  type: 'video' | 'image'
+): { allowed: boolean; remaining: number } => {
+  // Reset theo ngày đăng ký — mỗi người reset khác nhau
+  const reg = new Date(regDate);
+  const now = new Date();
+  const dayOfMonth = reg.getDate();
+  const currentDay = now.getDate();
+  // Trong chu kỳ tháng hiện tại kể từ ngày đăng ký
+  const cycleStart = new Date(now.getFullYear(), now.getMonth(), dayOfMonth);
+  if (cycleStart > now) cycleStart.setMonth(cycleStart.getMonth() - 1);
+  const daysSinceCycleStart = Math.floor((now.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24));
+  const isNewCycle = daysSinceCycleStart === 0 && currentDay === dayOfMonth;
+
+  if (type === 'video') {
+    const limit = 50;
+    const count = isNewCycle ? 0 : videoCount;
+    return { allowed: true, remaining: Math.max(0, limit - count) }; // Seedance vẫn cho tạo
+  } else {
+    const limit = 1000;
+    const count = isNewCycle ? 0 : imageCount;
+    return { allowed: count < limit, remaining: Math.max(0, limit - count) };
+  }
+};
 
 const FILM_STYLES = [
   { id: 'hollywood', name: { VN: '🎬 Hollywood (Mặc định)', EN: '🎬 Hollywood (Default)' }, prompt: 'Cinematic Hollywood movie style, high budget production, detailed textures, professional color grading' },
@@ -105,7 +184,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
   batchResults, setBatchResults,
   outputLanguage, setOutputLanguage, userPlan, credit,
   email,
-  apiKeys, hasApiKey, onOpenKeyPicker, useProjectKey, deductCredit
+  apiKeys, adminFreeKeys = [], adminPaidKeys = [], hasApiKey, onOpenKeyPicker, useProjectKey, deductCredit
 }) => {
   /**
    * Production-ready validation and credit/limit check.
@@ -563,6 +642,23 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
     const validationResult = await validateAndPrepareGeneration(3, 'video'); // Video cost: 3
     if (!validationResult) return null;
 
+    const isPro9 = validationResult.plan === 'PRO9' || validationResult.isAdmin;
+    const isAdmin = validationResult.isAdmin;
+
+    // Tự động chọn engine theo chủ đề (chỉ PRO9/Admin)
+    let activeEngine = selectedEngine;
+    if (isPro9 || isAdmin) {
+      const hasRefImg = (imagesSnapshot || currentImages).length > 0;
+      const videoCount = Number(validationResult.videoCount || 0);
+      activeEngine = isAdmin ? selectedEngine : autoSelectEngine(
+        selectedStyle.id,
+        selectedGenre.id,
+        hasRefImg,
+        videoCount,
+        isPro9
+      );
+    }
+
     const activeMode = modeSnapshot || mode;
     const activeImages = imagesSnapshot || currentImages;
     const taskId = `vpro-${Date.now()}-${laneId}-${index}`;
@@ -586,11 +682,11 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       }
       
       // Use effective API keys and project key flag from validation result
-      const result = await generateVideoByEngine(selectedEngine, {
+      const result = await generateVideoByEngine(activeEngine, {
         prompt: prompt,
         aspectRatio: aspectRatio === AspectRatio.LANDSCAPE ? '16:9' : aspectRatio === AspectRatio.PORTRAIT ? '9:16' : '1:1',
         duration: 8,
-        apiKey: selectedEngine === 'veo' ? '' : effectiveWavespeedKey,
+        apiKey: activeEngine === 'veo' ? '' : effectiveWavespeedKey,
         onProgress: (msg) => {
           if (isStoppingRef.current) return;
           setActiveTasks(cur => cur.map(t => t.id === taskId ? { 
@@ -1302,46 +1398,76 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           
           try {
             let imageUrl: string;
+            const isPro9User = validationResult.plan === 'PRO9' || validationResult.isAdmin;
+            const isAdminUser = validationResult.isAdmin;
+
           if (profile.use_free_image_gen) {
+            // FREE IMG bật → SiliconFlow(refImage) → Pixazo → Pollinations
+            // PRO9: kiểm tra giới hạn 1000 ảnh (không tính Pollinations)
+            const imageCount = Number(validationResult.imageCount || 0);
+            const regDate = validationResult.reg_date || validationResult.regDate || '';
+            const limitCheck = (isPro9User && !isAdminUser && regDate)
+              ? checkPro9MonthlyLimit(regDate, 0, imageCount, 'image')
+              : { allowed: true, remaining: 9999 };
+
             try {
-              // Show Rendering status
-        
-              const freeRes = await generateImageFree(finalPrompt);
+              const freeRes = await generateImageFree(
+                finalPrompt,
+                refImage || undefined,   // truyền refImage để SiliconFlow giữ khuôn mặt
+              );
               imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
-              console.warn("[Batch] Free image gen failed/returned empty, falling back:", freeErr);
-              // Fallback to Gemini only if NOT Free plan (Free plan can only use personal keys for Gemini)
-              const isPro = profile.accountType?.includes('pro') || profile.role === 'admin';
-              if (isPro || validationResult.effectiveApiKeys.length > 0) {
+              console.warn("[Batch] Free image gen failed, falling back:", freeErr);
+              const isPro = validationResult.role === 'admin' || isPro9User || validationResult.effectiveApiKeys.length > 0;
+              if (isPro) {
                 imageUrl = await generateGeminiImage(
-                  finalPrompt,
-                  sysInst,
+                  finalPrompt, sysInst,
                   validationResult.effectiveApiKeys,
                   aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
-                  refImage || undefined,
-                  outputLanguage,
-                  validationResult.effectiveUseProjectKey
+                  refImage || undefined, outputLanguage,
+                  validationResult.effectiveUseProjectKey,
+                  adminFreeKeys, adminPaidKeys
                 );
               } else {
                 throw new Error("Free image generation failed and no personal API key provided.", { cause: freeErr });
               }
             }
           } else {
-            // If Free plan and NO personal keys, block image gen via project keys
+            // FREE IMG tắt
             if (userPlan === 'free' && !validationResult.isAdmin && validationResult.effectiveUseProjectKey) {
-                 throw new Error("Gói Free không hỗ trợ tạo ảnh bằng API dự án. Vui lòng bật nút FREE IMG (FLUX) hoặc dán API cá nhân.\n\nFree plan doesn't support images via project API. Use Flux or personal key.");
+              throw new Error("Gói Free không hỗ trợ tạo ảnh bằng API dự án. Vui lòng bật nút FREE IMG (FLUX) hoặc dán API cá nhân.\n\nFree plan doesn't support images via project API. Use Flux or personal key.");
             }
-            imageUrl = await generateGeminiImage(
-                finalPrompt,
-                sysInst,
+            // PRO9: kiểm tra giới hạn 1000 ảnh/tháng (SiliconFlow + Pixazo)
+            const imageCount = Number(validationResult.imageCount || 0);
+            const regDate = validationResult.reg_date || validationResult.regDate || '';
+            if (isPro9User && !isAdminUser && regDate) {
+              const limitCheck = checkPro9MonthlyLimit(regDate, 0, imageCount, 'image');
+              if (!limitCheck.allowed) {
+                // Hết giới hạn SiliconFlow/Pixazo → fallback Pollinations
+                const { url } = await generateImageFree(finalPrompt);
+                imageUrl = url;
+              } else {
+                imageUrl = await generateGeminiImage(
+                  finalPrompt, sysInst,
+                  validationResult.effectiveApiKeys,
+                  aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+                  refImage || undefined, outputLanguage,
+                  validationResult.effectiveUseProjectKey,
+                  adminFreeKeys, adminPaidKeys
+                );
+              }
+            } else {
+              imageUrl = await generateGeminiImage(
+                finalPrompt, sysInst,
                 validationResult.effectiveApiKeys,
                 aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
-                refImage || undefined,
-                outputLanguage,
-                validationResult.effectiveUseProjectKey
+                refImage || undefined, outputLanguage,
+                validationResult.effectiveUseProjectKey,
+                adminFreeKeys, adminPaidKeys
               );
             }
+          }
 
             if (isStoppingRef.current) return null;
             
@@ -1406,30 +1532,28 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       let imageUrl: string;
       if (profile.use_free_image_gen) {
         try {
-          const freeRes = await generateImageFree(finalPrompt);
+          const freeRes = await generateImageFree(finalPrompt, refImage || undefined);
           imageUrl = freeRes.url;
           if (!imageUrl) throw new Error("Empty URL from free gen");
         } catch (freeErr) {
           console.warn("[Regen] Free image gen failed, falling back to Gemini:", freeErr);
           imageUrl = await generateGeminiImage(
-            finalPrompt,
-            sysInst,
+            finalPrompt, sysInst,
             validationResult.effectiveApiKeys,
             aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
-            refImage || undefined,
-            outputLanguage,
-            validationResult.effectiveUseProjectKey
+            refImage || undefined, outputLanguage,
+            validationResult.effectiveUseProjectKey,
+            adminFreeKeys, adminPaidKeys
           );
         }
       } else {
         imageUrl = await generateGeminiImage(
-          finalPrompt,
-          sysInst,
+          finalPrompt, sysInst,
           validationResult.effectiveApiKeys,
           aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
-          refImage || undefined,
-          outputLanguage,
-          validationResult.effectiveUseProjectKey
+          refImage || undefined, outputLanguage,
+          validationResult.effectiveUseProjectKey,
+          adminFreeKeys, adminPaidKeys
         );
       }
 
@@ -1483,30 +1607,28 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           let imageUrl: string;
           if (profile.use_free_image_gen) {
             try {
-              const freeRes = await generateImageFree(finalPrompt);
+              const freeRes = await generateImageFree(finalPrompt, refImage || undefined);
               imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
               console.warn("[Regen Selected] Free image gen failed, falling back to Gemini:", freeErr);
               imageUrl = await generateGeminiImage(
-                finalPrompt,
-                sysInst,
+                finalPrompt, sysInst,
                 validationResult.effectiveApiKeys,
                 aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
-                refImage || undefined,
-                outputLanguage,
-                validationResult.effectiveUseProjectKey
+                refImage || undefined, outputLanguage,
+                validationResult.effectiveUseProjectKey,
+                adminFreeKeys, adminPaidKeys
               );
             }
           } else {
             imageUrl = await generateGeminiImage(
-              finalPrompt,
-              sysInst,
+              finalPrompt, sysInst,
               validationResult.effectiveApiKeys,
               aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
-              refImage || undefined,
-              outputLanguage,
-              validationResult.effectiveUseProjectKey
+              refImage || undefined, outputLanguage,
+              validationResult.effectiveUseProjectKey,
+              adminFreeKeys, adminPaidKeys
             );
           }
 
