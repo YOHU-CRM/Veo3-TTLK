@@ -665,91 +665,70 @@ export const generateGeminiImage = async (
 // ================================================================
 export const generateImageFree = async (
   prompt: string,
-  refImageBase64?: string,       // ảnh tham chiếu (base64) nếu có
-  pixazoApiKey?: string,         // key Pixazo (free tier hoặc trả phí)
-  siliconflowApiKey?: string,    // key SiliconFlow cho ref image
-  userApiKeys: string[] = []     // keys người dùng nhập vào tool
-): Promise<{ url: string; directUrl?: boolean; base64?: boolean }> => {
+  refImageBase64?: string,
+  _pixazoApiKey?: string,      // giữ tham số để không lỗi chỗ gọi
+  _siliconflowApiKey?: string, // giữ tham số để không lỗi chỗ gọi
+  userApiKeys: string[] = [],
+  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9'
+): Promise<{ url: string; directUrl?: boolean }> => {
   const seed = Math.floor(Math.random() * 9999999);
 
-  // Lấy keys từ env hoặc từ danh sách người dùng nhập
-  const resolveEnvKey = (envName: string) =>
-    (typeof import.meta !== 'undefined' ? (import.meta as any).env?.[envName] : undefined) ||
-    (typeof process !== 'undefined' ? process.env?.[envName] : undefined);
+  // Tính kích thước ảnh theo aspectRatio
+  const sizeMap: Record<string, string> = {
+    '16:9': '1280x720',
+    '9:16': '720x1280',
+    '1:1':  '1024x1024',
+  };
+  const size = sizeMap[aspectRatio] || '1280x720';
 
-  const pixazoKey = pixazoApiKey || resolveEnvKey('VITE_PIXAZO_API_KEY') ||
-    userApiKeys.find(k => k.startsWith('pxz-') || k.startsWith('pixazo-'));
-
-  const sfKey = siliconflowApiKey || resolveEnvKey('VITE_SILICONFLOW_API_KEY') ||
-    userApiKeys.find(k => k.startsWith('sk-') && k.length > 30);
-
-  // ── Ưu tiên 1a: Có ảnh tham chiếu → SiliconFlow FLUX.1 Kontext Dev ($0.015/ảnh) ──
-  if (refImageBase64 && sfKey) {
+  // ── Ưu tiên 1a: Có ảnh tham chiếu → SiliconFlow qua proxy /api/siliconflow ──
+  if (refImageBase64) {
     try {
-      const rawB64 = refImageBase64.includes(',') ? refImageBase64.split(',')[1] : refImageBase64;
-      const sfRes = await fetch('https://api.siliconflow.cn/v1/images/generations', {
+      const sfRes = await fetch('/api/siliconflow', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${sfKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'black-forest-labs/FLUX.1-Kontext-dev',
-          prompt: prompt,
-          image: `data:image/png;base64,${rawB64}`,
-          image_size: '1024x1024',
-          num_inference_steps: 28,
-          seed: seed,
+          prompt,
+          image: refImageBase64.startsWith('data:')
+            ? refImageBase64
+            : `data:image/png;base64,${refImageBase64}`,
+          size,
         }),
         signal: AbortSignal.timeout(60000),
       });
       if (sfRes.ok) {
         const sfData = await sfRes.json();
-        const imgUrl = sfData?.images?.[0]?.url || sfData?.data?.[0]?.url;
-        if (imgUrl) return { url: imgUrl, directUrl: true };
+        if (sfData?.url) return { url: sfData.url, directUrl: true };
       } else {
-        console.warn('[FreeImg] SiliconFlow lỗi:', sfRes.status);
+        console.warn('[FreeImg] SiliconFlow proxy lỗi:', sfRes.status);
       }
     } catch (err) {
-      console.warn('[FreeImg] SiliconFlow thất bại:', err);
+      console.warn('[FreeImg] SiliconFlow proxy thất bại:', err);
     }
   }
 
-  // ── Ưu tiên 1b: Không có ref image → Pixazo FLUX Schnell ($0.0012/ảnh) ──
-  if (pixazoKey) {
-    try {
-      const pixazoRes = await fetch('https://api.pixazo.ai/v1/images/generations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${pixazoKey}`,
-        },
-        body: JSON.stringify({
-          model: 'flux-schnell',
-          prompt: prompt,
-          n: 1,
-          size: '1024x1024',
-        }),
-        signal: AbortSignal.timeout(30000),
-      });
-      if (pixazoRes.ok) {
-        const pixData = await pixazoRes.json();
-        const imgUrl = pixData?.data?.[0]?.url || pixData?.images?.[0]?.url;
-        if (imgUrl) return { url: imgUrl, directUrl: true };
-      } else {
-        console.warn('[FreeImg] Pixazo lỗi:', pixazoRes.status, await pixazoRes.text().catch(() => ''));
-      }
-    } catch (err) {
-      console.warn('[FreeImg] Pixazo thất bại, chuyển Pollinations:', err);
+  // ── Ưu tiên 1b: Pixazo qua proxy /api/pixazo ──
+  try {
+    const pixRes = await fetch('/api/pixazo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, size }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (pixRes.ok) {
+      const pixData = await pixRes.json();
+      if (pixData?.url) return { url: pixData.url, directUrl: true };
+    } else {
+      console.warn('[FreeImg] Pixazo proxy lỗi:', pixRes.status);
     }
+  } catch (err) {
+    console.warn('[FreeImg] Pixazo proxy thất bại, chuyển Pollinations:', err);
   }
 
-  // ── Fallback: Pollinations flux-realism (miễn phí, không cần key) ──
-  // QUAN TRỌNG: Chỉ trả URL thẳng — KHÔNG fetch/download
-  // Vercel timeout nếu fetch ảnh về server, Pollinations cần 15-30s render
-  // <img src=URL> tự load phía client → không bao giờ timeout
+  // ── Fallback: Pollinations (miễn phí, không CORS) ──
   const encodedPrompt = encodeURIComponent(prompt);
-  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=1280&height=720&nologo=true&seed=${seed}&enhance=true&quality=high`;
+  const [w, h] = size.split('x');
+  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=${w}&height=${h}&nologo=true&seed=${seed}&enhance=true&quality=high`;
   return { url: pollinationsUrl, directUrl: true };
 };
 
