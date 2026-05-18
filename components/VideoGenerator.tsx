@@ -1525,11 +1525,16 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           }
         };
 
-        // Chạy batch 15 ảnh song song, từng batch chờ xong mới chạy batch tiếp
+        // Chạy batch ảnh song song — stagger khi FREE IMG bật (Pollinations cần giãn cách)
+        const POLLINATIONS_STAGGER_MS = 600; // giãn 600ms mỗi ảnh, tránh Pollinations throttle
         for (let b = 0; b < linesToGenerate.length; b += BATCH_SIZE) {
           if (isStoppingRef.current) break;
           const batch = linesToGenerate.slice(b, b + BATCH_SIZE);
-          await Promise.all(batch.map((line, j) => generateOne(line, b + j)));
+          await Promise.all(batch.map((line, j) => {
+            const staggerDelay = profile.use_free_image_gen ? j * POLLINATIONS_STAGGER_MS : 0;
+            return new Promise<void>(resolve => setTimeout(resolve, staggerDelay))
+              .then(() => generateOne(line, b + j));
+          }));
         }
     } catch (err: any) { 
       console.error("Batch Image Gen Error:", err);
@@ -1984,7 +1989,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                       {batchResults.map((res, idx) => (
                         <div key={idx} className="flex-shrink-0 w-32 relative group">
                           {res.url ? (
-                            <a href={res.url} target="_blank" rel="noopener noreferrer" onClick={e => { if(res.url.startsWith("http")) e.stopPropagation(); }}><img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" /></a>
+                            <a href={res.url} target="_blank" rel="noopener noreferrer" onClick={e => { if(res.url.startsWith("http")) e.stopPropagation(); }}><img src={res.url} className="w-full h-full object-contain rounded-xl border-2 border-slate-100 bg-black" /></a>
                           ) : (
                             <div className="w-full h-full bg-slate-100 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
                               <span className={`text-[9px] ${res.error ? 'text-red-500' : 'text-slate-400'} font-black uppercase leading-tight cursor-help`} title={res.error}>
