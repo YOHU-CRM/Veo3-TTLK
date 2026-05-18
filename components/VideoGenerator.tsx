@@ -612,6 +612,11 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
   };
 
   const downloadImageFile = (url: string, filename: string) => {
+    if (url.startsWith('http')) {
+      // URL thẳng → mở tab mới, không navigate → không mất state
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const a = document.createElement('a');
     a.href = url;
     a.download = `${filename}.png`;
@@ -1372,18 +1377,25 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       }
     }
 
+    // Toast cảnh báo nếu > 20 prompt
+    if (linesToGenerate.length > 20) {
+      const toast = document.createElement('div');
+      toast.innerText = '💡 Để tối ưu tốc độ, nên tạo tối đa 20 ảnh mỗi lần';
+      toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:12px 24px;border-radius:12px;font-size:13px;font-weight:600;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);opacity:1;transition:opacity 0.5s';
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 500); }, 4000);
+    }
+
     setBatchResults([]); // Xóa kết quả cũ trước khi chạy mới
     setGeneratingTool('BATCH'); setIsGenerating(true); isStoppingRef.current = false; startCountdown();
     try {
         const styleStr = `${(selectedStyle.name as any)[outputLanguage]} (${selectedStyle.prompt})`;
-        
-        // Optimize: Use Promise.all with a small delay between requests for faster generation
-        // while avoiding hitting global rate limits too hard.
-        const tasks = linesToGenerate.map(async (line, i) => {
-          if (isStoppingRef.current) return null;
-          
-          // Add a staggered delay (e.g., 3000ms per item) to avoid overwhelming the API
-          await new Promise(resolve => setTimeout(resolve, i * 3000));
+        const BATCH_SIZE = 15; // 15 ảnh song song, tối ưu cho cả Gemini FREE (15 req/phút) và Pollinations
+
+        // Pre-fill loading state ngay
+        setBatchResults(linesToGenerate.map(line => ({ prompt: line, url: '', selected: false })));
+
+        const generateOne = async (line: string, i: number) => {
           if (isStoppingRef.current) return null;
 
           let finalPrompt: string;
@@ -1434,23 +1446,24 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
               }
             }
           } else {
-            // FREE IMG tắt
+            // FREE IMG tắt → thứ tự: Gemini FREE key → Gemini PAID key → Pollinations
             if (userPlan === 'free' && !validationResult.isAdmin && validationResult.effectiveUseProjectKey) {
               throw new Error("Gói Free không hỗ trợ tạo ảnh bằng API dự án. Vui lòng bật nút FREE IMG (FLUX) hoặc dán API cá nhân.\n\nFree plan doesn't support images via project API. Use Flux or personal key.");
             }
-            // PRO9: kiểm tra giới hạn 1000 ảnh/tháng (SiliconFlow + Pixazo)
+            // PRO9: kiểm tra giới hạn ảnh/tháng
             const imageCount = Number(validationResult.imageCount || 0);
             const regDate = validationResult.reg_date || validationResult.regDate || '';
             if (isPro9User && !isAdminUser && regDate) {
               const limitCheck = checkPro9MonthlyLimit(regDate, 0, imageCount, 'image');
               if (!limitCheck.allowed) {
-                // Hết giới hạn SiliconFlow/Pixazo → fallback Pollinations
+                // Hết giới hạn → fallback Pollinations
                 const { url } = await generateImageFree(finalPrompt);
                 imageUrl = url;
               } else {
+                // Thứ tự đúng: FREE key (adminFreeKeys) trước → PAID key sau
                 imageUrl = await generateGeminiImage(
                   finalPrompt, sysInst,
-                  validationResult.effectiveApiKeys,
+                  [...(adminFreeKeys || []), ...validationResult.effectiveApiKeys],
                   aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                   refImage || undefined, outputLanguage,
                   validationResult.effectiveUseProjectKey,
@@ -1458,9 +1471,10 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                 );
               }
             } else {
+              // Thứ tự đúng: FREE key trước → PAID key sau
               imageUrl = await generateGeminiImage(
                 finalPrompt, sysInst,
-                validationResult.effectiveApiKeys,
+                [...(adminFreeKeys || []), ...validationResult.effectiveApiKeys],
                 aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
                 refImage || undefined, outputLanguage,
                 validationResult.effectiveUseProjectKey,
@@ -1500,12 +1514,14 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             }
             return null;
           }
-        });
+        };
 
-        // Pre-fill batch results with loading state
-        setBatchResults(linesToGenerate.map(line => ({ prompt: line, url: "", selected: false })));
-        
-        await Promise.all(tasks);
+        // Chạy batch 15 ảnh song song, từng batch chờ xong mới chạy batch tiếp
+        for (let b = 0; b < linesToGenerate.length; b += BATCH_SIZE) {
+          if (isStoppingRef.current) break;
+          const batch = linesToGenerate.slice(b, b + BATCH_SIZE);
+          await Promise.all(batch.map((line, j) => generateOne(line, b + j)));
+        }
     } catch (err: any) { 
       console.error("Batch Image Gen Error:", err);
       alert(`${translate('RENDER_ERROR', outputLanguage)}: ${err.message || err}`); 
@@ -1949,7 +1965,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                       {batchResults.map((res, idx) => (
                         <div key={idx} className="flex-shrink-0 w-32 relative group">
                           {res.url ? (
-                            <img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" />
+                            <a href={res.url} target="_blank" rel="noopener noreferrer" onClick={e => { if(res.url.startsWith("http")) e.stopPropagation(); }}><img src={res.url} className="w-full h-full object-cover rounded-xl border-2 border-slate-100" /></a>
                           ) : (
                             <div className="w-full h-full bg-slate-100 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
                               <span className={`text-[9px] ${res.error ? 'text-red-500' : 'text-slate-400'} font-black uppercase leading-tight cursor-help`} title={res.error}>
