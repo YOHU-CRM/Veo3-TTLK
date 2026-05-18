@@ -495,7 +495,7 @@ export const generateGeminiImage = async (
   prompt: string, 
   systemInstruction: string, 
   apiKeys: string[], 
-  aspectRatio: "16:9" | "9:16",
+  aspectRatio: "16:9" | "9:16" | "1:1",
   refImage?: string,
   lang: 'EN' | 'VN' = 'EN',
   useProjectKey: boolean = true,
@@ -648,10 +648,10 @@ export const generateGeminiImage = async (
       }
     }
   }
-  // Hết tất cả Gemini key → fallback Pixazo/SiliconFlow/Pollinations
+  // Hết tất cả Gemini key → fallback chuỗi: Pixazo → SiliconFlow → Pollinations
   // Không báo lỗi thẳng → user vẫn nhận được ảnh
-  console.warn('[GeminiImage] Tất cả key hết quota, fallback generateImageFree...');
-  const freeRes = await generateImageFree(prompt);
+  console.warn('[GeminiImage] Tất cả key hết quota, fallback generateImageFree (full chain)...');
+  const freeRes = await generateImageFree(prompt, refImage, undefined, undefined, [], aspectRatio as '16:9' | '9:16', false);
   return freeRes.url;
 };
 
@@ -669,7 +669,8 @@ export const generateImageFree = async (
   _pixazoApiKey?: string,      // giữ tham số để không lỗi chỗ gọi
   _siliconflowApiKey?: string, // giữ tham số để không lỗi chỗ gọi
   userApiKeys: string[] = [],
-  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9'
+  aspectRatio: '16:9' | '9:16' | '1:1' = '16:9',
+  pollinationsOnly: boolean = false  // true = FREE IMG bật → Pollinations ngay, false = chuỗi đầy đủ
 ): Promise<{ url: string; directUrl?: boolean }> => {
   const seed = Math.floor(Math.random() * 9999999);
 
@@ -680,8 +681,38 @@ export const generateImageFree = async (
     '1:1':  '1024x1024',
   };
   const size = sizeMap[aspectRatio] || '1280x720';
+  const [w, h] = size.split('x');
+  const encodedPrompt = encodeURIComponent(prompt);
+  const buildPollinationsUrl = () =>
+    `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=${w}&height=${h}&nologo=true&seed=${seed}&enhance=true&quality=high`;
 
-  // ── Ưu tiên 1a: Có ảnh tham chiếu → SiliconFlow qua proxy /api/siliconflow ──
+  // ── FREE IMG BẬT: Pollinations ngay lập tức (nhanh, trả URL thẳng, không chờ API) ──
+  if (pollinationsOnly) {
+    return { url: buildPollinationsUrl(), directUrl: true };
+  }
+
+  // ── FREE IMG TẮT: chuỗi chất lượng cao ──
+  // Thứ tự: Pixazo → SiliconFlow (có ref) → SiliconFlow (không ref) → Pollinations
+
+  // 1. Pixazo FLUX Schnell (nhanh, rẻ, không cần ref)
+  try {
+    const pixRes = await fetch('/api/pixazo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, size }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (pixRes.ok) {
+      const pixData = await pixRes.json();
+      if (pixData?.url) return { url: pixData.url, directUrl: true };
+    } else {
+      console.warn('[FreeImg] Pixazo proxy lỗi:', pixRes.status);
+    }
+  } catch (err) {
+    console.warn('[FreeImg] Pixazo proxy thất bại:', err);
+  }
+
+  // 2. SiliconFlow FLUX Kontext Dev — CÓ ảnh tham chiếu (giữ khuôn mặt nhân vật)
   if (refImageBase64) {
     try {
       const sfRes = await fetch('/api/siliconflow', {
@@ -700,36 +731,33 @@ export const generateImageFree = async (
         const sfData = await sfRes.json();
         if (sfData?.url) return { url: sfData.url, directUrl: true };
       } else {
-        console.warn('[FreeImg] SiliconFlow proxy lỗi:', sfRes.status);
+        console.warn('[FreeImg] SiliconFlow (ref) proxy lỗi:', sfRes.status);
       }
     } catch (err) {
-      console.warn('[FreeImg] SiliconFlow proxy thất bại:', err);
+      console.warn('[FreeImg] SiliconFlow (ref) proxy thất bại:', err);
     }
   }
 
-  // ── Ưu tiên 1b: Pixazo qua proxy /api/pixazo ──
+  // 3. SiliconFlow FLUX Kontext Dev — KHÔNG có ảnh tham chiếu
   try {
-    const pixRes = await fetch('/api/pixazo', {
+    const sfRes2 = await fetch('/api/siliconflow', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, size }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
-    if (pixRes.ok) {
-      const pixData = await pixRes.json();
-      if (pixData?.url) return { url: pixData.url, directUrl: true };
+    if (sfRes2.ok) {
+      const sfData2 = await sfRes2.json();
+      if (sfData2?.url) return { url: sfData2.url, directUrl: true };
     } else {
-      console.warn('[FreeImg] Pixazo proxy lỗi:', pixRes.status);
+      console.warn('[FreeImg] SiliconFlow (no ref) proxy lỗi:', sfRes2.status);
     }
   } catch (err) {
-    console.warn('[FreeImg] Pixazo proxy thất bại, chuyển Pollinations:', err);
+    console.warn('[FreeImg] SiliconFlow (no ref) proxy thất bại, chuyển Pollinations:', err);
   }
 
-  // ── Fallback: Pollinations (miễn phí, không CORS) ──
-  const encodedPrompt = encodeURIComponent(prompt);
-  const [w, h] = size.split('x');
-  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=${w}&height=${h}&nologo=true&seed=${seed}&enhance=true&quality=high`;
-  return { url: pollinationsUrl, directUrl: true };
+  // 4. Pollinations — fallback cuối cùng
+  return { url: buildPollinationsUrl(), directUrl: true };
 };
 
 export const generateGeminiVoice = async (
