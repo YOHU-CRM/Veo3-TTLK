@@ -1414,7 +1414,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             const isAdminUser = validationResult.isAdmin;
 
           if (profile.use_free_image_gen) {
-            // FREE IMG bật → SiliconFlow(refImage) → Pixazo → Pollinations
+            // FREE IMG bật → Pollinations ngay lập tức (nhanh, trả URL thẳng, không chờ API)
             // PRO9: kiểm tra giới hạn 1000 ảnh (không tính Pollinations)
             const imageCount = Number(validationResult.imageCount || 0);
             const regDate = validationResult.reg_date || validationResult.regDate || '';
@@ -1425,7 +1425,10 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             try {
               const freeRes = await generateImageFree(
                 finalPrompt,
-                refImage || undefined,   // truyền refImage để SiliconFlow giữ khuôn mặt
+                refImage || undefined,
+                undefined, undefined, [],
+                aspectRatio === AspectRatio.LANDSCAPE ? '16:9' : aspectRatio === AspectRatio.PORTRAIT ? '9:16' : '1:1',
+                true  // FREE IMG BẬT → Pollinations ngay (nhanh, trả URL thẳng)
               );
               imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
@@ -1436,7 +1439,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
                 imageUrl = await generateGeminiImage(
                   finalPrompt, sysInst,
                   validationResult.effectiveApiKeys,
-                  aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+                  aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : aspectRatio === AspectRatio.PORTRAIT ? "9:16" : "1:1",
                   refImage || undefined, outputLanguage,
                   validationResult.effectiveUseProjectKey,
                   adminFreeKeys, adminPaidKeys
@@ -1456,15 +1459,21 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             if (isPro9User && !isAdminUser && regDate) {
               const limitCheck = checkPro9MonthlyLimit(regDate, 0, imageCount, 'image');
               if (!limitCheck.allowed) {
-                // Hết giới hạn → fallback Pollinations
-                const { url } = await generateImageFree(finalPrompt);
+                // Hết giới hạn tháng → fallback chuỗi: Pixazo → SiliconFlow → Pollinations
+                const { url } = await generateImageFree(
+                  finalPrompt,
+                  refImage || undefined,
+                  undefined, undefined, [],
+                  aspectRatio === AspectRatio.LANDSCAPE ? '16:9' : aspectRatio === AspectRatio.PORTRAIT ? '9:16' : '1:1',
+                  false  // chuỗi đầy đủ, không phải Pollinations-only
+                );
                 imageUrl = url;
               } else {
                 // Thứ tự đúng: FREE key (adminFreeKeys) trước → PAID key sau
                 imageUrl = await generateGeminiImage(
                   finalPrompt, sysInst,
                   [...(adminFreeKeys || []), ...validationResult.effectiveApiKeys],
-                  aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+                  aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : aspectRatio === AspectRatio.PORTRAIT ? "9:16" : "1:1",
                   refImage || undefined, outputLanguage,
                   validationResult.effectiveUseProjectKey,
                   adminFreeKeys, adminPaidKeys
@@ -1475,7 +1484,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
               imageUrl = await generateGeminiImage(
                 finalPrompt, sysInst,
                 [...(adminFreeKeys || []), ...validationResult.effectiveApiKeys],
-                aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+                aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : aspectRatio === AspectRatio.PORTRAIT ? "9:16" : "1:1",
                 refImage || undefined, outputLanguage,
                 validationResult.effectiveUseProjectKey,
                 adminFreeKeys, adminPaidKeys
@@ -1548,7 +1557,12 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
       let imageUrl: string;
       if (profile.use_free_image_gen) {
         try {
-          const freeRes = await generateImageFree(finalPrompt, refImage || undefined);
+          const freeRes = await generateImageFree(
+            finalPrompt, refImage || undefined,
+            undefined, undefined, [],
+            aspectRatio === AspectRatio.LANDSCAPE ? '16:9' : aspectRatio === AspectRatio.PORTRAIT ? '9:16' : '1:1',
+            true  // FREE IMG BẬT → Pollinations ngay
+          );
           imageUrl = freeRes.url;
           if (!imageUrl) throw new Error("Empty URL from free gen");
         } catch (freeErr) {
@@ -1556,7 +1570,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           imageUrl = await generateGeminiImage(
             finalPrompt, sysInst,
             validationResult.effectiveApiKeys,
-            aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+            aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : aspectRatio === AspectRatio.PORTRAIT ? "9:16" : "1:1",
             refImage || undefined, outputLanguage,
             validationResult.effectiveUseProjectKey,
             adminFreeKeys, adminPaidKeys
@@ -1566,7 +1580,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
         imageUrl = await generateGeminiImage(
           finalPrompt, sysInst,
           validationResult.effectiveApiKeys,
-          aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+          aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : aspectRatio === AspectRatio.PORTRAIT ? "9:16" : "1:1",
           refImage || undefined, outputLanguage,
           validationResult.effectiveUseProjectKey,
           adminFreeKeys, adminPaidKeys
@@ -1623,7 +1637,12 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
           let imageUrl: string;
           if (profile.use_free_image_gen) {
             try {
-              const freeRes = await generateImageFree(finalPrompt, refImage || undefined);
+              const freeRes = await generateImageFree(
+                finalPrompt, refImage || undefined,
+                undefined, undefined, [],
+                aspectRatio === AspectRatio.LANDSCAPE ? '16:9' : aspectRatio === AspectRatio.PORTRAIT ? '9:16' : '1:1',
+                true  // FREE IMG BẬT → Pollinations ngay
+              );
               imageUrl = freeRes.url;
               if (!imageUrl) throw new Error("Empty URL from free gen");
             } catch (freeErr) {
@@ -1631,7 +1650,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
               imageUrl = await generateGeminiImage(
                 finalPrompt, sysInst,
                 validationResult.effectiveApiKeys,
-                aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+                aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : aspectRatio === AspectRatio.PORTRAIT ? "9:16" : "1:1",
                 refImage || undefined, outputLanguage,
                 validationResult.effectiveUseProjectKey,
                 adminFreeKeys, adminPaidKeys
@@ -1641,7 +1660,7 @@ export const VideoGenerator: React.FC<VideoGeneratorProps> = ({
             imageUrl = await generateGeminiImage(
               finalPrompt, sysInst,
               validationResult.effectiveApiKeys,
-              aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : "9:16",
+              aspectRatio === AspectRatio.LANDSCAPE ? "16:9" : aspectRatio === AspectRatio.PORTRAIT ? "9:16" : "1:1",
               refImage || undefined, outputLanguage,
               validationResult.effectiveUseProjectKey,
               adminFreeKeys, adminPaidKeys
