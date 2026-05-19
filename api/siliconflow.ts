@@ -9,7 +9,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const apiKey = import.meta.env.VITE_SILICONFLOW_API_KEY;
+const apiKey = (import.meta as any).env.VITE_SILICONFLOW_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: 'SiliconFlow API key not configured' });
   }
